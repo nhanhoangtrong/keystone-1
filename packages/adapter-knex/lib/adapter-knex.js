@@ -287,6 +287,8 @@ class KnexListAdapter extends BaseListAdapter {
     });
   }
 
+  ////////// Mutations //////////
+
   async _processNonRealFields(data, processFunction) {
     return resolveAllKeys(
       arrayToObject(
@@ -301,7 +303,30 @@ class KnexListAdapter extends BaseListAdapter {
     );
   }
 
-  ////////// Mutations //////////
+  _getNearFar(fieldAdapter) {
+    const { rel, listAdapter } = fieldAdapter;
+    const { columnNames } = rel;
+    const columnKey = listAdapter.key;
+    return columnNames[columnKey];
+  }
+
+  async _createSingle(realData) {
+    const item = (
+      await this._query()
+        .insert(realData)
+        .into(this.tableName)
+        .returning('*')
+    )[0];
+    const itemId = item.id;
+    return { item, itemId };
+  }
+
+  async _setNullByValue({ tableName, columnName, value }) {
+    return this._query()
+      .table(tableName)
+      .where(columnName, value)
+      .update({ [columnName]: null });
+  }
 
   async _createOrUpdateField({ value, adapter, itemId }) {
     const rel = {
@@ -309,19 +334,18 @@ class KnexListAdapter extends BaseListAdapter {
       tableName: this._manyTable(adapter.path),
       columnNames: { [this.key]: { near: `${this.key}_id`, far: adapter.refListId } },
     };
-    const { cardinality, tableName, columnNames } = rel;
+    const { tableName, cardinality } = rel;
     if (cardinality === '1:1') {
       // Implement me
     } else {
       const values = value; // Rename this because we have a many situation
       if (values && values.length) {
         if (cardinality === 'N:N') {
-          const itemCol = columnNames[this.key].near;
-          const otherCol = columnNames[this.key].far;
+          const { near, far } = this._getNearFar(adapter);
           return this._query()
-            .insert(values.map(id => ({ [itemCol]: itemId, [otherCol]: id })))
+            .insert(values.map(id => ({ [near]: itemId, [far]: id })))
             .into(tableName)
-            .returning(otherCol);
+            .returning(far);
         } else {
           // Implement me
         }
@@ -335,16 +359,11 @@ class KnexListAdapter extends BaseListAdapter {
     const realData = pick(data, this.realKeys);
 
     // Insert the real data into the table
-    const item = (
-      await this._query()
-        .insert(realData)
-        .into(this.tableName)
-        .returning('*')
-    )[0];
+    const { item, itemId } = await this._createSingle(realData);
 
     // For every many-field, update the many-table
     const manyItem = await this._processNonRealFields(data, async ({ value, adapter }) =>
-      this._createOrUpdateField({ value, adapter, itemId: item.id })
+      this._createOrUpdateField({ value, adapter, itemId })
     );
 
     return { ...item, ...manyItem };
@@ -352,6 +371,7 @@ class KnexListAdapter extends BaseListAdapter {
 
   async _update(id, data) {
     const realData = pick(data, this.realKeys);
+
     // Update the real data
     const query = this._query()
       .table(this.tableName)
@@ -369,15 +389,21 @@ class KnexListAdapter extends BaseListAdapter {
         tableName: this._manyTable(path),
         columnNames: { [this.key]: { near: `${this.key}_id`, far: refListId } },
       };
-      const { cardinality, tableName, columnNames } = rel;
+      const { cardinality, tableName } = rel;
       let value;
       // Future task: Is there some way to combine the following three
       // operations into a single query?
 
       if (cardinality !== '1:1') {
         // Work out what we've currently got
-        const selectCol = columnNames[this.key].far;
-        const matchCol = columnNames[this.key].near;
+        let matchCol, selectCol;
+        if (cardinality === 'N:N') {
+          const { near, far } = this._getNearFar(adapter);
+          matchCol = near;
+          selectCol = far;
+        } else {
+          // Implement me
+        }
         const currentRefIds = (
           await this._query()
             .select(selectCol)
@@ -422,22 +448,21 @@ class KnexListAdapter extends BaseListAdapter {
                 tableName: a.config.many ? adapter._manyTable(a.path) : adapter.tableName,
                 columnNames: { [this.key]: { near: a.refListId } },
               };
-              const { cardinality, columnName, tableName, columnNames } = rel;
+              const { cardinality, columnName, tableName } = rel;
               if (cardinality === 'N:N') {
+                const { near } = this._getNearFar(a);
                 return this._query()
                   .table(tableName)
-                  .where(columnNames[this.key].near, id)
+                  .where(near, id)
                   .del();
               } else {
-                return this._query()
-                  .table(tableName)
-                  .where(columnName, id)
-                  .update({ [columnName]: null });
+                return this._setNullByValue({ tableName, columnName, value: id });
               }
             })
         )
       )
     );
+
     // Delete the actual item
     return this._query()
       .table(this.tableName)
