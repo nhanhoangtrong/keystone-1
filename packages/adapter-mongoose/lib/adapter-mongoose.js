@@ -64,11 +64,11 @@ class MongooseAdapter extends BaseKeystoneAdapter {
     });
   }
 
-  async postConnect({ keystone }) {
+  async postConnect({ keystone: { rels } }) {
     // Setup all schemas
     Object.values(this.listAdapters).forEach(listAdapter => {
       listAdapter.fieldAdapters.forEach(fieldAdapter => {
-        fieldAdapter.addToMongooseSchema(listAdapter.schema, listAdapter.mongoose, keystone.rels);
+        fieldAdapter.addToMongooseSchema(listAdapter.schema, listAdapter.mongoose, rels);
       });
     });
 
@@ -80,7 +80,7 @@ class MongooseAdapter extends BaseKeystoneAdapter {
 
     // Setup models for N:N tables, I guess?
     await asyncForEach(
-      keystone.rels.filter(({ cardinality }) => cardinality === 'N:N'),
+      rels.filter(({ cardinality }) => cardinality === 'N:N'),
       async rel => {
         await this._createAdjacencyTable(rel);
       }
@@ -88,7 +88,7 @@ class MongooseAdapter extends BaseKeystoneAdapter {
 
     // Then...
     return await pSettle(
-      Object.values(this.listAdapters).map(listAdapter => listAdapter._postConnect({ keystone }))
+      Object.values(this.listAdapters).map(listAdapter => listAdapter._postConnect({ rels }))
     );
   }
 
@@ -207,10 +207,10 @@ class MongooseListAdapter extends BaseListAdapter {
    *
    * @return Promise<>
    */
-  async _postConnect({ keystone }) {
-    this.rels = keystone.rels;
+  async _postConnect({ rels }) {
+    this.rels = rels;
     this.fieldAdapters.forEach(fieldAdapter => {
-      fieldAdapter.rel = keystone.rels.find(
+      fieldAdapter.rel = rels.find(
         ({ left, right }) =>
           left.adapter === fieldAdapter || (right && right.adapter === fieldAdapter)
       );
@@ -501,8 +501,6 @@ class MongooseListAdapter extends BaseListAdapter {
       if (cardinality === 'N:N') {
         const a = from.fromList.adapter.fieldAdaptersByPath[from.fromField];
         const columnKey = `${from.fromList.adapter.key}.${a.path}`;
-        // console.log({ columnKey, columnNames });
-        // console.log({ [columnNames[columnKey].near]: { $eq: mongoose.Types.ObjectId(from.fromId) } });
         ids = await this._getModel(tableName).aggregate([
           {
             $match: {
@@ -510,9 +508,7 @@ class MongooseListAdapter extends BaseListAdapter {
             },
           },
         ]);
-        // console.log({ ids });
         ids = ids.map(x => x[columnNames[columnKey].far]);
-        // console.log({ ids });
       } else {
         ids = await this._getModel(tableName).aggregate([
           { $match: { [columnName]: mongoose.Types.ObjectId(from.fromId) } },

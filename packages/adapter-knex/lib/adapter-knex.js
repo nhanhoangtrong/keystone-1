@@ -67,9 +67,9 @@ class KnexAdapter extends BaseKeystoneAdapter {
     return result;
   }
 
-  async postConnect({ keystone }) {
+  async postConnect({ rels }) {
     Object.values(this.listAdapters).forEach(listAdapter => {
-      listAdapter._postConnect({ keystone });
+      listAdapter._postConnect({ rels });
     });
 
     // Run this only if explicity configured and still never in production
@@ -81,10 +81,10 @@ class KnexAdapter extends BaseKeystoneAdapter {
     } else {
       return [];
     }
-    return this._createTables({ keystone });
+    return this._createTables({ rels });
   }
 
-  async _createTables({ keystone }) {
+  async _createTables({ rels }) {
     const createResult = await pSettle(
       Object.values(this.listAdapters).map(listAdapter => listAdapter.createTable())
     );
@@ -104,7 +104,7 @@ class KnexAdapter extends BaseKeystoneAdapter {
     }
 
     const fkResult = [];
-    await asyncForEach(keystone.rels, async ({ left, right, cardinality, tableName }) => {
+    await asyncForEach(rels, async ({ left, right, cardinality, tableName }) => {
       try {
         if (cardinality === 'N:N') {
           await this._createAdjacencyTable({ left, tableName });
@@ -262,10 +262,10 @@ class KnexListAdapter extends BaseListAdapter {
 
   prepareFieldAdapter() {}
 
-  _postConnect({ keystone }) {
-    this.rels = keystone.rels;
+  _postConnect({ rels }) {
+    this.rels = rels;
     this.fieldAdapters.forEach(fieldAdapter => {
-      fieldAdapter.rel = keystone.rels.find(
+      fieldAdapter.rel = rels.find(
         ({ left, right }) =>
           left.adapter === fieldAdapter || (right && right.adapter === fieldAdapter)
       );
@@ -577,12 +577,10 @@ class QueryBuilder {
       this._query.column(`${baseTableAlias}.*`);
     }
 
-    // console.log('1. Add joins');
     this._addJoins(this._query, listAdapter, where, baseTableAlias);
 
     // Joins/where to effectively translate us onto a different list
     if (Object.keys(from).length) {
-      // console.log('2. Add from join');
       const a = from.fromList.adapter.fieldAdaptersByPath[from.fromField];
       const { cardinality, tableName, columnName } = a.rel;
       const otherTableAlias = this._getNextBaseTableAlias();
@@ -611,7 +609,6 @@ class QueryBuilder {
       this._query.whereRaw('true');
     }
 
-    // console.log('3. Add wheres');
     this._addWheres(w => this._query.andWhere(w), listAdapter, where, baseTableAlias);
 
     // TODO: Implement configurable search fields for lists
@@ -673,7 +670,6 @@ class QueryBuilder {
     listAdapter.fieldAdapters
       .filter(a => a.isRelationship && a.rel.cardinality === '1:1' && a.rel.right === a.field)
       .forEach(a => {
-        // console.log('1.a. 1:1 Joins');
         const { tableName, columnName } = a.rel;
         const otherTableAlias = `${tableAlias}__${a.path}_11`;
         if (!this._tableAliases[otherTableAlias]) {
@@ -695,7 +691,6 @@ class QueryBuilder {
     for (let path of joinPaths) {
       if (path === 'AND' || path === 'OR') {
         // AND/OR we need to traverse their children
-        // console.log('1.b AND/OR joins');
         where[path].forEach(x => this._addJoins(query, listAdapter, x, tableAlias));
       } else {
         const otherAdapter = listAdapter.fieldAdaptersByPath[path];
@@ -711,7 +706,6 @@ class QueryBuilder {
           const otherListAdapter = listAdapter.getListAdapterByKey(otherList);
           const otherTableAlias = `${tableAlias}__${path}`;
           if (!this._tableAliases[otherTableAlias]) {
-            // console.log('1.c some/every/none join');
             this._tableAliases[otherTableAlias] = true;
             query.leftOuterJoin(
               `${otherListAdapter.tableName} as ${otherTableAlias}`,
@@ -719,7 +713,6 @@ class QueryBuilder {
               `${tableAlias}.${path}`
             );
           }
-          // console.log('1.d recursive join');
           this._addJoins(query, otherListAdapter, where[path], otherTableAlias);
         }
       }
@@ -732,10 +725,8 @@ class QueryBuilder {
     for (let path of Object.keys(where)) {
       const condition = this._getQueryConditionByPath(listAdapter, path, tableAlias);
       if (condition) {
-        // console.log('3.a Simple condition');
         whereJoiner(condition(where[path]));
       } else if (path === 'AND' || path === 'OR') {
-        // console.log('3.b AND/OR condition');
         whereJoiner(q => {
           // AND/OR need to traverse both side of the query
           let subJoiner;
@@ -755,12 +746,10 @@ class QueryBuilder {
         const fieldAdapter = listAdapter.fieldAdaptersByPath[path];
         if (fieldAdapter) {
           // Non-many relationship. Traverse the sub-query, using the referenced list as a root.
-          // console.log('3.c Non-many relationship recursion');
           const otherListAdapter = listAdapter.getListAdapterByKey(fieldAdapter.refListKey);
           this._addWheres(whereJoiner, otherListAdapter, where[path], `${tableAlias}__${path}`);
         } else {
           // Many relationship
-          // console.log('3.d Many relationship');
           const [p, constraintType] = path.split('_');
           const { rel } = listAdapter.fieldAdaptersByPath[p];
           const { cardinality, tableName, columnName } = rel;
@@ -770,7 +759,6 @@ class QueryBuilder {
           const subQuery = listAdapter._query();
           let otherTableAlias;
           if (cardinality === '1:N' || cardinality === 'N:1') {
-            // console.log('3.d.i 1:N');
             otherTableAlias = subBaseTableAlias;
             subQuery
               .select(`${subBaseTableAlias}.${columnName}`)
@@ -779,7 +767,6 @@ class QueryBuilder {
             // otherwise postgres will give very incorrect answers.
             subQuery.whereNotNull(columnName);
           } else {
-            // console.log('3.d.ii N:N');
             const { near, far } = listAdapter._getNearFar(listAdapter.fieldAdaptersByPath[p]);
             otherTableAlias = `${subBaseTableAlias}__${p}`;
             subQuery
