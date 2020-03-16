@@ -1,5 +1,4 @@
 const express = require('express');
-const { restrictAudienceMiddleware } = require('@keystonejs/session');
 const { GraphQLPlaygroundApp } = require('@keystonejs/app-graphql-playground');
 const { createApolloServer } = require('./lib/apolloServer');
 const validation = require('./validation');
@@ -41,8 +40,7 @@ class GraphQLApp {
     // { cors: false } - prevent ApolloServer from overriding Keystone's CORS configuration.
     // https://www.apollographql.com/docs/apollo-server/api/apollo-server.html#ApolloServer-applyMiddleware
     // This probably isn't the right place to put this restriction middleware. -TL
-    const restrict = restrictAudienceMiddleware({ isPublic: true });
-    app.use(apiPath, restrict);
+    app.use(apiPath, keystone._sessionManager.getRestrictAudienceMiddleware({ isPublic: true }));
     app.use(server.getMiddleware({ path: apiPath, cors: false }));
     return app;
   }
