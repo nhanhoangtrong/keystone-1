@@ -65,8 +65,10 @@ class AdminUIApp {
     }
 
     return (
-      req.user &&
-      this._isAccessAllowed({ authentication: { item: req.user, listKey: req.authedListKey } }) &&
+      req.authedItem &&
+      this._isAccessAllowed({
+        authentication: { item: req.authedItem, listKey: req.authedListKey },
+      }) &&
       req.session.audiences &&
       req.session.audiences.includes('admin')
     );

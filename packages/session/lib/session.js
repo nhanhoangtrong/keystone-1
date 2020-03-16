@@ -68,37 +68,44 @@ class SessionManager {
     });
 
     const _populateAuthedItemMiddleware = async (req, res, next) => {
-      if (!req.session || !req.session.keystoneItemId) {
-        return next();
-      }
-      const list = keystone.lists[req.session.keystoneListKey];
-      if (!list) {
-        // TODO: probably destroy the session
-        return next();
-      }
-      let item;
-      try {
-        item = await list.getAccessControlledItem(req.session.keystoneItemId, true, {
-          operation: 'read',
-          context: {},
-          info: {},
-        });
-      } catch (e) {
-        // If the item no longer exists, getAccessControlledItem() will throw an exception
-        return next();
-      }
+      const item = await this._getAuthedItem(req, keystone);
       if (!item) {
         // TODO: probably destroy the session
         return next();
       }
-      req.user = item;
-      req.authedListKey = list.key;
+
+      req.authedItem = item;
+      req.authedListKey = req.session.keystoneListKey;
       req.audiences = req.session.audiences;
 
       next();
     };
 
     return [injectAuthCookieMiddleware, sessionMiddleware, _populateAuthedItemMiddleware];
+  }
+
+  async _getAuthedItem(req, keystone) {
+    if (!req.session || !req.session.keystoneItemId) {
+      return;
+    }
+    const list = keystone.lists[req.session.keystoneListKey];
+    if (!list) {
+      return;
+    }
+    let item;
+    try {
+      item = await list.getAccessControlledItem(req.session.keystoneItemId, true, {
+        operation: 'read',
+        context: {},
+        info: {},
+      });
+    } catch (e) {
+      return;
+    }
+    if (!item) {
+      return;
+    }
+    return item;
   }
 
   getRestrictAudienceMiddleware({ isPublic, audiences }) {
@@ -144,9 +151,10 @@ class SessionManager {
 
   getContext(req) {
     return {
-      startAuthedSession: ({ item, list }, audiences) => this.startAuthedSession(req, { item, list }, audiences),
+      startAuthedSession: ({ item, list }, audiences) =>
+        this.startAuthedSession(req, { item, list }, audiences),
       endAuthedSession: () => this.endAuthedSession(req),
-      authedItem: req.user,
+      authedItem: req.authedItem,
       authedListKey: req.authedListKey,
     };
   }
