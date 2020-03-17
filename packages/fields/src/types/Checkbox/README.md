@@ -30,7 +30,7 @@ The `Checkbox` field type doesn't support indexes or unique enforcement.
 
 ## GraphQL
 
-`Uuid` fields use the `Boolean` type in GraphQL.
+`Checkbox` fields use the `Boolean` type in GraphQL.
 
 ### Input Fields
 
